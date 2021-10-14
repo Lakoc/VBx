@@ -88,8 +88,6 @@ if __name__ == '__main__':
     assert 0 <= args.loopP <= 1, f'Expecting loopP between 0 and 1, got {args.loopP} instead.'
 
     # segments file with x-vector timing information
-    print(args.segments_file)
-    exit(0)
     segs_dict = read_xvector_timing_dict(args.segments_file)
 
     kaldi_plda = read_plda(args.plda_file)
