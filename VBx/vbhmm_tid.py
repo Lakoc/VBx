@@ -46,6 +46,8 @@ from diarization_lib import read_xvector_timing_dict, l2_norm, cos_similarity, t
     merge_adjacent_labels, mkdir_p
 from kaldi_utils import read_plda
 from VB_diarization import VB_diarization
+from helpers.x_vec import extract_xvec_normalized
+from helpers.scoring import kaldi_ivector_plda_scoring_dense_1vsN
 
 
 def write_output(fp, out_labels, starts, ends):
@@ -83,6 +85,10 @@ if __name__ == '__main__':
                              ' smoothing. Not so important, high value (e.g. 10) is OK  => keeping hard assigment')
     parser.add_argument('--output-2nd', required=False, type=bool, default=False,
                         help='Output also second most likely speaker of VB-HMM')
+    parser.add_argument('--therapist_template', required=False, type=str,
+                        help='Therapist x-vec template file')
+    parser.add_argument('--sid_threshold', required=False, type=float,
+                        help='SID threshold')
 
     args = parser.parse_args()
     assert 0 <= args.loopP <= 1, f'Expecting loopP between 0 and 1, got {args.loopP} instead.'
@@ -101,7 +107,7 @@ if __name__ == '__main__':
     # Open ark file with x-vectors and in each iteration of the following for-loop
     # read a batch of x-vectors corresponding to one recording
     arkit = kaldi_io.read_vec_flt_ark(args.xvec_ark_file)
-    recit = itertools.groupby(arkit, lambda e: e[0].rsplit('_', 1)[0]) # group xvectors in ark by recording name
+    recit = itertools.groupby(arkit, lambda e: e[0].rsplit('_', 1)[0])  # group xvectors in ark by recording name
     for file_name, segs in recit:
         print(file_name)
         seg_names, xvecs = zip(*segs)
@@ -138,7 +144,7 @@ if __name__ == '__main__':
                 q, sp, L = VB_diarization(
                     fea, sm, np.diag(siE), np.diag(sV),
                     pi=None, gamma=qinit, maxSpeakers=qinit.shape[1],
-                    maxIters=40, epsilon=1e-6, 
+                    maxIters=40, epsilon=1e-6,
                     loopProb=args.loopP, Fa=args.Fa, Fb=args.Fb)
 
                 labels1st = np.argsort(-q, axis=1)[:, 0]
@@ -148,32 +154,94 @@ if __name__ == '__main__':
                 MAX_SPKS = 10
                 prev_L = -float('inf')
                 random_iterations = int(args.init.split('_')[1])
-                np.random.seed(3) # for reproducibility
+                np.random.seed(3)  # for reproducibility
                 for _ in range(random_iterations):
-                    q_init = np.random.normal(size=(x.shape[0], MAX_SPKS),loc=0.5,scale=0.01)
+                    q_init = np.random.normal(size=(x.shape[0], MAX_SPKS), loc=0.5, scale=0.01)
                     q_init = softmax(q_init * args.init_smoothing, axis=1)
                     fea = (x - plda_mu).dot(plda_tr.T)[:, :args.lda_dim]
                     sm = np.zeros(args.lda_dim)
                     siE = np.ones(args.lda_dim)
                     sV = np.sqrt(plda_psi[:args.lda_dim])
                     q_tmp, sp, L = VB_diarization(
-                        fea, sm, np.diag(siE), np.diag(sV), 
-                        pi=None, gamma=q_init, maxSpeakers=q_init.shape[1], 
-                        maxIters=40, epsilon=1e-6, 
+                        fea, sm, np.diag(siE), np.diag(sV),
+                        pi=None, gamma=q_init, maxSpeakers=q_init.shape[1],
+                        maxIters=40, epsilon=1e-6,
                         loopProb=args.loopP, Fa=args.Fa, Fb=args.Fb)
                     if L[-1][0] > prev_L:
                         prev_L = L[-1][0]
                         q = q_tmp
                 labels1st = np.argsort(-q, axis=1)[:, 0]
                 if q.shape[1] > 1:
-                    labels2nd = np.argsort(-q, axis=1)[:, 1]                    
+                    labels2nd = np.argsort(-q, axis=1)[:, 1]
         else:
             raise ValueError('Wrong option for args.initialization.')
 
-        assert(np.all(segs_dict[file_name][0] == np.array(seg_names)))
+        uniq_speakers = np.unique(labels1st)
+
+        if len(uniq_speakers) > 2:
+            # Load x_vec segment representations
+            template_vec, _ = extract_xvec_normalized(args.therapist_template, [mean1, mean2, lda])
+            speakers_vec = [(x[np.where(labels1st == speaker), :][0,:], np.argwhere(labels1st == speaker).squeeze()) for speaker in uniq_speakers]
+
+
+            speaker_count = len(speakers_vec)
+            # Iterate over until 2 speakers left
+            while speaker_count > 2:
+                speakers = np.zeros((speaker_count, 2))
+                # Score calculation
+                for speaker in range(speaker_count):
+                    x_vectors = np.append(template_vec, speakers_vec[speaker][0], axis=0)
+                    speaker_score = np.mean(
+                        kaldi_ivector_plda_scoring_dense_1vsN(kaldi_plda, x_vectors, pca_dim=x_vectors.shape[1]))
+                    speakers[speaker] = [speaker_score, speakers_vec[speaker][0].shape[0]]
+
+                # Therapist probably not found
+                if np.max(speakers[:, 0]) < args.sid_threshold:
+                    print('Therapist not matched correctly')
+
+                # extract x-vectors and calculate means
+                therapist, client = np.argmax(speakers[:, 0]), np.argmin(speakers[:, 0])
+                therapist_vec, client_vec = speakers_vec[therapist], speakers_vec[client]
+                t_vec_mean, c_vec_mean = np.mean(therapist_vec[0], axis=0)[np.newaxis, :], np.mean(client_vec[0], axis=0)[
+                                                                                         np.newaxis, :]
+
+                # Remove elements from array
+                del speakers_vec[therapist]
+                del speakers_vec[client]
+
+                # Calculate score with other speakers
+                t_scores = [np.mean(
+                    kaldi_ivector_plda_scoring_dense_1vsN(kaldi_plda, np.append(t_vec_mean, spk[0], axis=0),
+                                                          pca_dim=therapist_vec[0].shape[1])) for spk in speakers_vec]
+                c_scores = [np.mean(
+                    kaldi_ivector_plda_scoring_dense_1vsN(kaldi_plda, np.append(c_vec_mean, spk[0], axis=0),
+                                                          pca_dim=client_vec[0].shape[1])) for spk in speakers_vec]
+
+                # Merge two closest segments
+                t_max, c_max = (np.max(t_scores), np.argmax(t_scores)), (np.max(c_scores), np.argmax(c_scores))
+                if t_max[0] > c_max[0]:
+                    therapist_vec = np.append(therapist_vec[0], speakers_vec[t_max[1]][0], axis=0), np.append(therapist_vec[1], speakers_vec[t_max[1]][1])
+                    del speakers_vec[t_max[1]]
+                else:
+                    client_vec = np.append(client_vec[0], speakers_vec[c_max[1]][0], axis=0), np.append(client_vec[1], speakers_vec[c_max[1]][1])
+                    del speakers_vec[c_max[1]]
+
+                # Append values back to list
+                speakers_vec.append(therapist_vec)
+                speakers_vec.append(client_vec)
+                speaker_count = speaker_count - 1
+            labels1st[speakers_vec[0][1]] =0
+            labels1st[speakers_vec[1][1]] =1
+        else:
+            labels1st[np.where(labels1st == np.min(labels1st))] = 0
+            labels1st[np.where(labels1st == np.max(labels1st))] = 1
+
+
+        assert (np.all(segs_dict[file_name][0] == np.array(seg_names)))
         start, end = segs_dict[file_name][1].T
 
         starts, ends, out_labels = merge_adjacent_labels(start, end, labels1st)
+
         mkdir_p(args.out_rttm_dir)
         with open(os.path.join(args.out_rttm_dir, f'{file_name}.rttm'), 'w') as fp:
             write_output(fp, out_labels, starts, ends)
