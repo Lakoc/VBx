@@ -90,7 +90,6 @@ if __name__ == '__main__':
     parser.add_argument('--sid_threshold', required=False, type=float,
                         help='SID threshold')
 
-    print('here')
     args = parser.parse_args()
     assert 0 <= args.loopP <= 1, f'Expecting loopP between 0 and 1, got {args.loopP} instead.'
 
