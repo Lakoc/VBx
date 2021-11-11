@@ -109,7 +109,6 @@ if __name__ == '__main__':
     arkit = kaldi_io.read_vec_flt_ark(args.xvec_ark_file)
     recit = itertools.groupby(arkit, lambda e: e[0].rsplit('_', 1)[0])  # group xvectors in ark by recording name
     for file_name, segs in recit:
-        print(file_name)
         seg_names, xvecs = zip(*segs)
         x = np.array(xvecs)
 

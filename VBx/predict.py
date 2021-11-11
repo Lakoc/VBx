@@ -21,7 +21,7 @@ from models.resnet import *
 torch.backends.cudnn.enabled = False
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.ERROR)
 
 
 class Timer(object):
