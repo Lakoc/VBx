@@ -145,7 +145,7 @@ if __name__ == '__main__':
                 if q.shape[1] > 1:
                     labels2nd = np.argsort(-q, axis=1)[:, 1]
             if args.init.startswith("random_"):
-                MAX_SPKS = 10
+                MAX_SPKS = 2
                 prev_L = -float('inf')
                 random_iterations = int(args.init.split('_')[1])
                 np.random.seed(3) # for reproducibility
