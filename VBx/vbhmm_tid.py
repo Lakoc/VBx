@@ -177,7 +177,7 @@ if __name__ == '__main__':
 
         uniq_speakers = np.unique(labels1st)
 
-        if len(uniq_speakers) > 2:
+        if len(uniq_speakers) > 2 and os.path.exists(args.therapist_template):
             # Load x_vec segment representations
             template_vec, _ = extract_xvec_normalized(args.therapist_template, [mean1, mean2, lda])
             speakers_vec = [(x[np.where(labels1st == speaker), :][0,:], np.argwhere(labels1st == speaker).squeeze()) for speaker in uniq_speakers]
