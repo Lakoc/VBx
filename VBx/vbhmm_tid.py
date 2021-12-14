@@ -180,8 +180,8 @@ if __name__ == '__main__':
         if len(uniq_speakers) > 2 and os.path.exists(args.therapist_template):
             # Load x_vec segment representations
             template_vec, _ = extract_xvec_normalized(args.therapist_template, [mean1, mean2, lda])
-            speakers_vec = [(x[np.where(labels1st == speaker), :][0,:], np.argwhere(labels1st == speaker).squeeze()) for speaker in uniq_speakers]
-
+            speakers_vec = [(x[np.where(labels1st == speaker), :][0, :], np.argwhere(labels1st == speaker).squeeze())
+                            for speaker in uniq_speakers]
 
             speaker_count = len(speakers_vec)
             # Iterate over until 2 speakers left
@@ -201,12 +201,17 @@ if __name__ == '__main__':
                 # extract x-vectors and calculate means
                 therapist, client = np.argmax(speakers[:, 0]), np.argmin(speakers[:, 0])
                 therapist_vec, client_vec = speakers_vec[therapist], speakers_vec[client]
-                t_vec_mean, c_vec_mean = np.mean(therapist_vec[0], axis=0)[np.newaxis, :], np.mean(client_vec[0], axis=0)[
-                                                                                         np.newaxis, :]
+                t_vec_mean, c_vec_mean = np.mean(therapist_vec[0], axis=0)[np.newaxis, :], np.mean(client_vec[0],
+                                                                                                   axis=0)[
+                                                                                           np.newaxis, :]
 
                 # Remove elements from array
-                del speakers_vec[therapist]
-                del speakers_vec[client]
+                if therapist > client:
+                    del speakers_vec[therapist]
+                    del speakers_vec[client]
+                else:
+                    del speakers_vec[client]
+                    del speakers_vec[therapist]
 
                 # Calculate score with other speakers
                 t_scores = [np.mean(
@@ -219,22 +224,25 @@ if __name__ == '__main__':
                 # Merge two closest segments
                 t_max, c_max = (np.max(t_scores), np.argmax(t_scores)), (np.max(c_scores), np.argmax(c_scores))
                 if t_max[0] > c_max[0]:
-                    therapist_vec = np.append(therapist_vec[0], speakers_vec[t_max[1]][0], axis=0), np.append(therapist_vec[1], speakers_vec[t_max[1]][1])
+                    therapist_vec = np.append(therapist_vec[0], speakers_vec[t_max[1]][0], axis=0), np.append(
+                        therapist_vec[1], speakers_vec[t_max[1]][1])
                     del speakers_vec[t_max[1]]
                 else:
-                    client_vec = np.append(client_vec[0], speakers_vec[c_max[1]][0], axis=0), np.append(client_vec[1], speakers_vec[c_max[1]][1])
+                    client_vec = np.append(client_vec[0], speakers_vec[c_max[1]][0], axis=0), np.append(client_vec[1],
+                                                                                                        speakers_vec[
+                                                                                                            c_max[1]][
+                                                                                                            1])
                     del speakers_vec[c_max[1]]
 
                 # Append values back to list
                 speakers_vec.append(therapist_vec)
                 speakers_vec.append(client_vec)
                 speaker_count = speaker_count - 1
-            labels1st[speakers_vec[0][1]] =0
-            labels1st[speakers_vec[1][1]] =1
+            labels1st[speakers_vec[0][1]] = 0
+            labels1st[speakers_vec[1][1]] = 1
         else:
             labels1st[np.where(labels1st == np.min(labels1st))] = 0
             labels1st[np.where(labels1st == np.max(labels1st))] = 1
-
 
         assert (np.all(segs_dict[file_name][0] == np.array(seg_names)))
         start, end = segs_dict[file_name][1].T
