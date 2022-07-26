@@ -291,7 +291,7 @@ if __name__ == '__main__':
             write_output(fp, out_labels, starts, ends)
 
         segments, _ = load_diar_rttm_unchanged(rttm_path)
-        speaker_tags = ['therapist', 'client']
+        speaker_tags = ['terapeut', 'klient']
         segments = [normalize_tuple_s([segment[1], segment[2] - segment[1], f'{speaker_tags[segment[0] - 1]}'])
                     for segment in segments]
         arr_to_ctm(args.out_ctm, segments)
