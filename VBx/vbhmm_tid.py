@@ -222,6 +222,7 @@ if __name__ == '__main__':
 
                     # extract x-vectors and calculate means
                     therapist, client = find_speakers(speakers)
+                    print(f'Similarities to therapist template: {speakers[:, 0]}')
                     # therapist, client = np.argmax(speakers[:, 0]), np.argmin(speakers[:, 0])
                     therapist_vec, client_vec = speakers_vec[therapist], speakers_vec[client]
 
