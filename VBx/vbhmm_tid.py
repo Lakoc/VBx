@@ -62,10 +62,30 @@ def find_speakers(sim):
     most_segments = np.argsort(sim[:, 1], axis=0)[::-1]
     client = (0, 0, -1)
     therapist = (0, 0, -1)
+
+    def enough_segments(candidate, original):
+        return sim[candidate][1] > original[1] / 4
+
+    if np.max(sim[:, 0]) <= 0:
+        therapist = np.argmax(sim[:, 0])
+        for index in most_segments:
+            if index == therapist:
+                continue
+            if sim[index][0] < client[0] and enough_segments(index, client):
+                client = (sim[index][0], sim[index][1], index)
+        return therapist, client[2]
+    elif np.min(sim[:, 0]) >= 0:
+        client = np.argmin(sim[:, 0])
+        for index in most_segments:
+            if index == client:
+                continue
+            if sim[index][0] > therapist[0] and enough_segments(index, therapist):
+                therapist = (sim[index][0], sim[index][1], index)
+        return therapist[2], client
     for index in most_segments:
-        if sim[index][0] < client[0] and sim[index][1] > client[1] / 4:
+        if sim[index][0] < client[0] and enough_segments(index, client):
             client = (sim[index][0], sim[index][1], index)
-        if sim[index][0] > therapist[0] and sim[index][1] > therapist[1] / 4:
+        if sim[index][0] > therapist[0] and enough_segments(index, therapist):
             therapist = (sim[index][0], sim[index][1], index)
     return therapist[2], client[2]
 
@@ -193,6 +213,9 @@ if __name__ == '__main__':
 
         uniq_speakers = np.unique(labels1st)
         print(f'VBx number of speakers initially detected: {len(uniq_speakers)}')
+        if len(uniq_speakers) < 2:
+            raise ValueError('Detected only single speaker!')
+
         if len(uniq_speakers) >= 2:
             if os.path.exists(args.therapist_template):
                 # Load x_vec segment representations
@@ -204,12 +227,11 @@ if __name__ == '__main__':
                     (x[np.where(labels1st == speaker), :][0, :], np.argwhere(labels1st == speaker).squeeze())
                     for speaker in uniq_speakers]
 
-                speaker_count = len(speakers_vec)
-                # Iterate over until 2 speakers left
-                while speaker_count > 2:
-                    speakers = np.zeros((speaker_count, 2))
+                speakers_count = len(speakers_vec)
+                if speakers_count > 2:
+                    speakers = np.zeros((speakers_count, 2))
                     # Score calculation
-                    for speaker in range(speaker_count):
+                    for speaker in range(speakers_count):
                         x_vectors = np.append(template_vecs, speakers_vec[speaker][0], axis=0)
                         speaker_score = kaldi_ivector_plda_scoring_dense_NvsM(kaldi_plda, x_vectors,
                                                                               template_range=template_vecs.shape[0],
@@ -223,6 +245,7 @@ if __name__ == '__main__':
                     # extract x-vectors and calculate means
                     therapist, client = find_speakers(speakers)
                     print(f'Similarities to therapist template: {speakers[:, 0]}')
+                    print(f'Therapist {therapist}, client: {client}')
                     # therapist, client = np.argmax(speakers[:, 0]), np.argmin(speakers[:, 0])
                     therapist_vec, client_vec = speakers_vec[therapist], speakers_vec[client]
 
@@ -233,45 +256,48 @@ if __name__ == '__main__':
                     else:
                         del speakers_vec[client]
                         del speakers_vec[therapist]
+                    speakers_count -= 2
+                    # Iterate over until 2 speakers left
+                    while speakers_count > 0:
+                        # Calculate score with other speakers
+                        t_scores = [np.mean(
+                            kaldi_ivector_plda_scoring_dense_NvsM(kaldi_plda,
+                                                                  np.append(therapist_vec[0], spk[0], axis=0),
+                                                                  template_range=therapist_vec[0].shape[0],
+                                                                  pca_dim=therapist_vec[0].shape[1])) for spk in
+                            speakers_vec]
+                        c_scores = [np.mean(
+                            kaldi_ivector_plda_scoring_dense_NvsM(kaldi_plda, np.append(client_vec[0], spk[0], axis=0),
+                                                                  template_range=client_vec[0].shape[0],
+                                                                  pca_dim=client_vec[0].shape[1])) for spk in
+                            speakers_vec]
 
-                    # Calculate score with other speakers
-                    t_scores = [np.mean(
-                        kaldi_ivector_plda_scoring_dense_NvsM(kaldi_plda, np.append(therapist_vec[0], spk[0], axis=0),
-                                                              template_range=therapist_vec[0].shape[0],
-                                                              pca_dim=therapist_vec[0].shape[1])) for spk in
-                        speakers_vec]
-                    c_scores = [np.mean(
-                        kaldi_ivector_plda_scoring_dense_NvsM(kaldi_plda, np.append(client_vec[0], spk[0], axis=0),
-                                                              template_range=client_vec[0].shape[0],
-                                                              pca_dim=client_vec[0].shape[1])) for spk in speakers_vec]
-
-                    # Merge two closest segments
-                    t_max, c_max = (np.max(t_scores), np.argmax(t_scores)), (np.max(c_scores), np.argmax(c_scores))
-                    if t_max[0] > c_max[0]:
-                        therapist_vec = np.append(therapist_vec[0], speakers_vec[t_max[1]][0], axis=0), np.append(
-                            therapist_vec[1], speakers_vec[t_max[1]][1])
-                        del speakers_vec[t_max[1]]
-                    else:
-                        client_vec = np.append(client_vec[0], speakers_vec[c_max[1]][0], axis=0), np.append(
-                            client_vec[1],
-                            speakers_vec[
-                                c_max[1]][
-                                1])
-                        del speakers_vec[c_max[1]]
-
-                    # Append values back to list
+                        # Merge two closest segments
+                        t_max, c_max = (np.max(t_scores), np.argmax(t_scores)), (np.max(c_scores), np.argmax(c_scores))
+                        if t_max[0] > c_max[0]:
+                            therapist_vec = np.append(therapist_vec[0], speakers_vec[t_max[1]][0], axis=0), np.append(
+                                therapist_vec[1], speakers_vec[t_max[1]][1])
+                            del speakers_vec[t_max[1]]
+                        else:
+                            client_vec = np.append(client_vec[0], speakers_vec[c_max[1]][0], axis=0), np.append(
+                                client_vec[1],
+                                speakers_vec[
+                                    c_max[1]][
+                                    1])
+                            del speakers_vec[c_max[1]]
+                        speakers_count = speakers_count - 1
                     speakers_vec.append(therapist_vec)
                     speakers_vec.append(client_vec)
-                    speaker_count = speaker_count - 1
-                else:
-                    speakers = np.zeros((speaker_count, 2))
-                    # Score calculation
-                    for speaker in range(speaker_count):
-                        x_vectors = np.append(template_vecs, speakers_vec[speaker][0], axis=0)
-                        speaker_score = kaldi_ivector_plda_scoring_dense_NvsM(kaldi_plda, x_vectors,
-                                                                              template_range=template_vecs.shape[0],
-                                                                              pca_dim=x_vectors.shape[1])
-                        speakers[speaker] = [np.mean(speaker_score), speakers_vec[speaker][0].shape[0]]
+
+                speakers_count = 2
+                speakers = np.zeros((speakers_count, 2))
+                # Score calculation
+                for speaker in range(speakers_count):
+                    x_vectors = np.append(template_vecs, speakers_vec[speaker][0], axis=0)
+                    speaker_score = kaldi_ivector_plda_scoring_dense_NvsM(kaldi_plda, x_vectors,
+                                                                          template_range=template_vecs.shape[0],
+                                                                          pca_dim=x_vectors.shape[1])
+                    speakers[speaker] = [np.mean(speaker_score), speakers_vec[speaker][0].shape[0]]
 
                 labels1st[speakers_vec[0][1]] = np.argmax(speakers[:, 0])
                 labels1st[speakers_vec[1][1]] = np.argmin(speakers[:, 0])
