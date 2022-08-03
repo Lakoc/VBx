@@ -52,8 +52,8 @@ from helpers.scoring import kaldi_ivector_plda_scoring_dense_NvsM
 from io_operations.io_writers import arr_to_ctm
 from io_operations.io_loaders import normalize_tuple_s, load_diar_rttm_unchanged
 import scipy.io.wavfile as wav
-from src.io_operations.custom import create_dir_if_not_exist
-from src.extract_xvec_from_audio_raw import xvec_extract
+from io_operations.custom import create_dir_if_not_exist
+from extract_xvec_from_audio_raw import xvec_extract
 import sys
 from scipy.spatial import distance
 from helpers.logging import *
