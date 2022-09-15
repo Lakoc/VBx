@@ -58,6 +58,7 @@ import sys
 from scipy.spatial import distance
 from helpers.logging import *
 
+
 def write_output(fp, out_labels, starts, ends):
     for label, seg_start, seg_end in zip(out_labels, starts, ends):
         fp.write(f'SPEAKER {file_name} 1 {seg_start:03f} {seg_end - seg_start:03f} '
